@@ -109,56 +109,46 @@ class FeegowSystem:
             return False
 
     def parse_html(self, html_content, nome_unidade):
-        """Transforma HTML em DataFrame limpo com correção de encoding"""
         if not html_content or "<table" not in html_content:
             return pd.DataFrame()
 
         try:
-            # Tenta decodificar entidades HTML (&nbsp; etc)
             html_content = html.unescape(html_content)
-            
-            # Lê a tabela
             dfs = pd.read_html(StringIO(html_content))
+            # Pega as 7 colunas originais do print
             df = dfs[0].iloc[:, :7].copy()
-            
-            # Renomeia
-            df.columns = ['HORA', 'CHEGADA', 'PACIENTE', 'IDADE', 'PROFISSIONAL', 'COMPROMISSO', 'TEMPO DE ESPERA']
+            df.columns = ['HORA', 'CHEGADA', 'PACIENTE', 'IDADE', 'PROFISSIONAL', 'COMPROMISSO', 'TEMPO_TEXTO']
 
-            # Função auxiliar de limpeza de texto
-            def limpar_texto(text):
-                if not isinstance(text, str):
-                    return str(text)
+            # Função para extrair dados da coluna de texto
+            def processar_status_tempo(texto):
+                texto = str(texto).strip()
                 
-                # Remove espaços extras
-                text = " ".join(text.split())
+                # Caso 1: "Em atendimento"
+                if "atendimento" in texto.lower():
+                    return "Em Atendimento", 0 # Status, Minutos
                 
-                # Correção manual de Encoding (Map de caracteres corrompidos comuns)
-                replacements = {
-                    'Ã¡': 'á', 'Ã ': 'à', 'Ã¢': 'â', 'Ã£': 'ã', 'Ã¤': 'ä',
-                    'Ã©': 'é', 'Ã¨': 'è', 'Ãª': 'ê', 'Ã«': 'ë',
-                    'Ã­': 'í', 'Ã¬': 'ì', 'Ã®': 'î', 'Ã¯': 'ï',
-                    'Ã³': 'ó', 'Ã²': 'ò', 'Ã´': 'ô', 'Ãµ': 'õ', 'Ã¶': 'ö',
-                    'Ãº': 'ú', 'Ã¹': 'ù', 'Ã»': 'û', 'Ã¼': 'ü',
-                    'Ã§': 'ç', 'Ã±': 'ñ', 'Ã': 'Á', # Caso sobre
-                    'hÃ¡': 'há', 'Á': 'Á', # Correção específica da fila
-                }
-                
-                for wrong, correct in replacements.items():
-                    text = text.replace(wrong, correct)
-                    
-                return text
+                # Caso 2: "Aguardando há 316 minutos"
+                # Extrai apenas os números usando Regex
+                match = re.search(r'(\d+)', texto)
+                minutos = int(match.group(1)) if match else 0
+                return "Espera", minutos
 
-            # Aplica a limpeza em todas as colunas
-            for col in df.columns:
-                df[col] = df[col].apply(limpar_texto)
-                if col == 'PACIENTE':
-                    df[col] = df[col].str.replace('Primeira vez ', '', case=False)
+            # Aplica a lógica
+            dados_processados = df['TEMPO_TEXTO'].apply(processar_status_tempo)
             
-            df.insert(0, 'UNIDADE', nome_unidade)
-            df['DATA_COLETA'] = datetime.now()
+            # Cria as novas colunas limpas
+            df['STATUS_DETECTADO'] = [x[0] for x in dados_processados]
+            df['ESPERA_MINUTOS'] = [x[1] for x in dados_processados]
+            
+            # Limpeza padrão
+            df['UNIDADE'] = nome_unidade
+            
+            # Removemos a coluna suja original para não atrapalhar
+            # df = df.drop(columns=['TEMPO_TEXTO']) 
+            
             return df
         except Exception as e:
-            print(f"Erro no parse: {e}")
+            print(f"Erro parse: {e}")
             return pd.DataFrame()
         
     def obter_dados_recepcao_core(self, unidade_id):

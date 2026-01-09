@@ -92,8 +92,7 @@ def run_monitor_medico():
                 db.finalizar_ausentes_medicos(nome_unidade, hashes_presentes)
                 
                 # Log por unidade para confirmar que passou aqui
-                if qtd_unidade > 0:
-                    print(f"   -> {nome_unidade}: {qtd_unidade} pacientes.")
+                print(f"   -> {nome_unidade}: {qtd_unidade} pacientes.")
 
             if sessao_ativa:
                 if total_detectado_ciclo == 0:

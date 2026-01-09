@@ -1,18 +1,24 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 
-const dbPath = path.join(process.cwd(), 'data', 'dados_clinica.db');
-
 export function getDbConnection() {
-  // fileMustExist: true previne criar um banco vazio se o caminho estiver errado
-  // verbose: console.log ajuda no debug (remova em produção)
-  const db = new Database(dbPath, { 
-    readonly: false, 
-    fileMustExist: true 
-  });
-  
-  // Opcional: Forçar WAL mode explicitamente na conexão de leitura (embora o Python já tenha definido)
-  db.pragma('journal_mode = WAL');
-  
-  return db;
+  // Caminho absoluto para o arquivo na raiz do projeto
+  // process.cwd() pega a raiz onde o next roda
+  const dbPath = path.join(process.cwd(), 'data', 'dados_clinica.db');
+
+  try {
+    // verbose: console.log ajuda a debugar queries se precisar
+    const db = new Database(dbPath, { 
+      verbose: process.env.NODE_ENV === 'development' ? console.log : undefined 
+    });
+    
+    // Ativa o modo WAL (Crucial para ler enquanto os pythons escrevem)
+    db.pragma('journal_mode = WAL');
+    
+    return db;
+  } catch (error) {
+    console.error("❌ Erro fatal ao conectar no SQLite:", error);
+    console.error("   Caminho tentado:", dbPath);
+    throw error;
+  }
 }

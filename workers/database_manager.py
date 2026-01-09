@@ -16,10 +16,9 @@ class DatabaseManager:
 
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
-            # --- CRÍTICO: Ativa modo WAL para evitar 'database is locked' ---
             conn.execute("PRAGMA journal_mode=WAL;") 
             
-            # Tabela Recepção
+            # Recepção (Mantido)
             conn.execute("""
             CREATE TABLE IF NOT EXISTS recepcao_historico (
                 id INTEGER PRIMARY KEY,
@@ -32,7 +31,7 @@ class DatabaseManager:
                 dia_referencia DATE
             )""")
             
-            # Tabela Médica (Com colunas novas)
+            # Médico (Mantido + Coluna nova)
             conn.execute("""
             CREATE TABLE IF NOT EXISTS espera_medica_historico (
                 hash_id TEXT PRIMARY KEY,
@@ -45,15 +44,18 @@ class DatabaseManager:
                 dt_chegada DATETIME,
                 dt_atendimento DATETIME,
                 status TEXT,
+                espera_min INTEGER,  -- NOVA COLUNA
                 dia_referencia DATE
             )""")
             
-            # Configurações (Cookie Manual)
+            # Migração silenciosa: Se a coluna espera_min não existir (banco antigo), cria ela
+            try:
+                conn.execute("ALTER TABLE espera_medica_historico ADD COLUMN espera_min INTEGER")
+            except sqlite3.OperationalError:
+                pass # Coluna já existe
+
             conn.execute("CREATE TABLE IF NOT EXISTS config (chave TEXT PRIMARY KEY, valor TEXT)")
-            
-            # Índices
             conn.execute("CREATE INDEX IF NOT EXISTS idx_rec_dia ON recepcao_historico (dia_referencia)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_med_dia ON espera_medica_historico (dia_referencia)")
 
     # --- CONFIGURAÇÃO (TOKEN MANUAL) ---
     def ler_cookie(self):
@@ -98,25 +100,50 @@ class DatabaseManager:
         if df_medico.empty: return
         hoje = datetime.date.today().isoformat()
         data_base = datetime.date.today().strftime('%Y-%m-%d')
+        
         with sqlite3.connect(self.db_path) as conn:
             for _, row in df_medico.iterrows():
                 hash_id = self._gerar_hash_medico(row, hoje)
                 dt_chegada_completa = f"{data_base} {row['CHEGADA']}:00"
                 
+                # Pega os dados processados no parse_html
+                status_real = row.get('STATUS_DETECTADO', 'Espera')
+                espera_real = row.get('ESPERA_MINUTOS', 0)
+                
+                # INSERT com o novo campo 'espera_min' e status dinâmico
+                # ON CONFLICT: Atualiza o status e o tempo de espera se o paciente já estiver lá
                 conn.execute("""
-                INSERT OR IGNORE INTO espera_medica_historico 
-                (hash_id, unidade_nome, paciente, idade, hora_agendada, profissional, especialidade, dt_chegada, status, dia_referencia)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Espera', ?)
-                """, (hash_id, row['UNIDADE'], row['PACIENTE'], row.get('IDADE',''), row.get('HORA',''), row['PROFISSIONAL'], row['COMPROMISSO'], dt_chegada_completa, hoje))
+                INSERT INTO espera_medica_historico 
+                (hash_id, unidade_nome, paciente, idade, hora_agendada, profissional, especialidade, dt_chegada, status, espera_min, dia_referencia)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(hash_id) DO UPDATE SET 
+                    status=excluded.status, 
+                    espera_min=excluded.espera_min
+                """, (
+                    hash_id, 
+                    row['UNIDADE'], 
+                    row['PACIENTE'], 
+                    row.get('IDADE',''), 
+                    row.get('HORA',''), 
+                    row['PROFISSIONAL'], 
+                    row['COMPROMISSO'], 
+                    dt_chegada_completa, 
+                    status_real,   # 'Espera' ou 'Em Atendimento'
+                    espera_real,   # Inteiro vindo do HTML
+                    hoje
+                ))
 
     def finalizar_ausentes_medicos(self, nome_unidade, lista_hashes_presentes):
         hoje = datetime.date.today().isoformat()
         agora = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         placeholders = ",".join([f"'{h}'" for h in lista_hashes_presentes]) if lista_hashes_presentes else "'NO_IDS'"
+        
         with sqlite3.connect(self.db_path) as conn:
+            # Só finaliza quem estava na fila ou em atendimento e sumiu do HTML
             conn.execute(f"""
                 UPDATE espera_medica_historico SET dt_atendimento = ?, status = 'Atendido_Inferido'
-                WHERE unidade_nome = ? AND dia_referencia = ? AND status = 'Espera' 
+                WHERE unidade_nome = ? AND dia_referencia = ? 
+                AND (status = 'Espera' OR status = 'Em Atendimento')
                 AND hash_id NOT IN ({placeholders})
             """, (agora, nome_unidade, hoje))
             
