@@ -9,38 +9,45 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Definição do Usuário
 model User {
-  id        String   @id @default(cuid()) // ID único (ex: clq2...)
+  id        String   @id @default(cuid())
   name      String?
   email     String   @unique
-  password  String   // Vamos salvar a senha aqui (criptografada futuramente)
-  role      String   @default("USER") // Níveis: "ADMIN", "DOCTOR", "USER"
+  password  String   
+  role      String   @default("USER")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  // Aqui podemos adicionar relações futuras (ex: logs, agendamentos)
   logs      Log[]
 }
 
-// Tabela de Auditoria (Já pensando no seu menu "Log de Auditoria")
 model Log {
   id        String   @id @default(cuid())
-  action    String   // O que foi feito (ex: "Criou usuário")
+  action    String   
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   timestamp DateTime @default(now())
 }
 
-// Tabela de Metas
 model Goal {
-  id        String   @id @default(uuid())
-  category  String   // Ex: 'comercial', 'financeiro', 'operacional'
-  metric    String   // Ex: 'agendamentos_diarios', 'faturamento_mensal'
-  label     String   // Nome legível: 'Agendamentos (Dia)'
-  value     Float    // O valor da meta (ex: 484)
-  month     String   // Formato 'YYYY-MM' para metas mensais
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(uuid())
+  category     String   
+  metric       String   
+  label        String   
+  value        Float    
+  month        String   
+  filter_group String?  // Mapeado para 'grupo' ou 'unidade'
+  updatedAt    DateTime @updatedAt
+  @@unique([metric, month])
+}
 
-  @@unique([metric, month]) // Garante apenas uma meta por métrica/mês
+model FaturamentoAnalitico {
+  hash_id    String   @id
+  unidade    String
+  grupo      String?  // Nova coluna extraída do Scraper
+  total_pago Float?
+  data       String?  // Formato DD/MM/YYYY vindo do Python
+  paciente   String?
+  updated_at String
+  
+  @@map("faturamento_analitico")
 }

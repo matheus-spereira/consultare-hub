@@ -6,60 +6,47 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const groupFilter = searchParams.get('group'); // Pega o filtro da URL
-
+    const groupFilter = searchParams.get('group');
     const db = getDbConnection();
 
-    // Cláusula SQL dinâmica: se tiver filtro, adiciona AND
-    const filterSQL = groupFilter && groupFilter !== 'all' 
-        ? `AND procedure_group = '${groupFilter}'` 
-        : '';
+    // Verificação dinâmica para evitar o erro de "no such column"
+    const info = db.prepare("PRAGMA table_info(faturamento_analitico)").all() as any[];
+    const dateCol = info.find(c => c.name === 'data' || c.name === 'data_vencimento')?.name || 'data';
 
-    // 1. Histórico Diário (Últimos 30 dias)
+    const filterSQL = groupFilter && groupFilter !== 'all' ? `AND grupo = '${groupFilter}'` : '';
+    const sqlDate = `substr(${dateCol}, 7, 4) || '-' || substr(${dateCol}, 4, 2) || '-' || substr(${dateCol}, 1, 2)`;
+
     const daily = db.prepare(`
-        SELECT date, SUM(value) as total, COUNT(*) as qtd
-        FROM feegow_appointments
-        WHERE status_id = 3 
-        AND date >= date('now', '-30 days')
-        ${filterSQL}
-        GROUP BY date
-        ORDER BY date DESC
-    `).all();
+        SELECT ${sqlDate} as d, SUM(total_pago) as total, COUNT(*) as qtd
+        FROM faturamento_analitico
+        WHERE ${sqlDate} >= date('now', '-30 days') ${filterSQL}
+        GROUP BY d ORDER BY d DESC
+    `).all() || [];
 
-    // 2. Histórico Mensal (Últimos 12 meses)
     const monthly = db.prepare(`
-        SELECT strftime('%Y-%m', date) as month, SUM(value) as total, COUNT(*) as qtd
-        FROM feegow_appointments
-        WHERE status_id = 3
-        AND date >= date('now', '-12 months')
-        ${filterSQL}
-        GROUP BY month
-        ORDER BY month DESC
-    `).all();
+        SELECT substr(${dateCol}, 7, 4) || '-' || substr(${dateCol}, 4, 2) as m, SUM(total_pago) as total
+        FROM faturamento_analitico
+        WHERE ${sqlDate} >= date('now', '-12 months') ${filterSQL}
+        GROUP BY m ORDER BY m DESC
+    `).all() || [];
 
-    // 3. Ranking de Grupos (Sempre traz todos para preencher o Select/Filtro)
-    // Trazemos também o Ticket Médio Geral por grupo aqui
+    // Busca os nomes dos GRUPOS extraídos pelo scraper
     const groups = db.prepare(`
-        SELECT procedure_group, SUM(value) as total, COUNT(*) as qtd
-        FROM feegow_appointments
-        WHERE status_id = 3
-        GROUP BY procedure_group
-        ORDER BY total DESC
-    `).all();
+        SELECT grupo as procedure_group, SUM(total_pago) as total
+        FROM faturamento_analitico
+        WHERE grupo IS NOT NULL AND grupo != ''
+        GROUP BY grupo ORDER BY total DESC
+    `).all() || [];
 
-    // 4. Totais Gerais (Cards do Topo)
     const totals = db.prepare(`
-        SELECT SUM(value) as total, COUNT(*) as qtd
-        FROM feegow_appointments
-        WHERE status_id = 3
-        AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now')
+        SELECT SUM(total_pago) as total, COUNT(*) as qtd
+        FROM faturamento_analitico
+        WHERE substr(${dateCol}, 7, 4) || '-' || substr(${dateCol}, 4, 2) = strftime('%Y-%m', 'now')
         ${filterSQL}
-    `).get() as { total: number, qtd: number };
+    `).get() as { total: number, qtd: number } || { total: 0, qtd: 0 };
 
     return NextResponse.json({ daily, monthly, groups, totals });
-
   } catch (error: any) {
-    console.error("ERRO API HISTORY:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
