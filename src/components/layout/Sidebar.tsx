@@ -14,7 +14,8 @@ import {
   Menu, 
   X,
   LogOut,
-  Target // Importando ícone de Alvo/Meta
+  Target,
+  UserCheck
 } from 'lucide-react';
 
 const cn = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(' ');
@@ -51,6 +52,8 @@ const menuItems: MenuItem[] = [
   { href: '/users', label: 'Gestão de Usuários', icon: Users, group: 'SISTEMA', roles: ['ADMIN'] },
   { href: '/admin/audit', label: 'Log de Auditoria', icon: ShieldCheck, group: 'SISTEMA', roles: ['ADMIN'] },
   { href: '/settings', label: 'Configurações', icon: Settings, group: 'SISTEMA', roles: ['ADMIN'] },
+
+  { href: '/produtividade', label: 'Produtividade & Qualidade', icon: UserCheck, group: 'OPERAÇÕES', roles: ['ADMIN', 'GESTOR', 'OPERADOR'] },
 ];
 
 export function Sidebar() {
